@@ -57,6 +57,32 @@ bool qcfw_sc_write_request_os_bank_indicator(uint8_t value)
 	return update_mgr_write_eeprom(0x3002, value) == 0;
 }
 
+bool qcfw_sc_write_ros0_crc32(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x3008 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_ros1_crc32(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x300c + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
 bool qcfw_read_from_file(const char* path, void* outBuf, uint64_t offset, uint32_t readSize)
 {
 	int32_t fd;
@@ -186,15 +212,18 @@ bool qcfw_get_qcfw_crc32(const char* crc32FilePath, uint32_t* outStagexCrc32, ui
 	return true;
 }
 
-bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
+bool qcfw_nor_read(uint64_t offset, void* data, uint32_t size, uint32_t burst_size)
 {
-	const uint8_t* dataa = (const uint8_t*)data;
+	uint8_t* dataa = (uint8_t*)data;
 
 	if (data == NULL)
 		return false;
 
 	if (size == 0)
 		return true;
+
+	if ((offset + size) > (16 * 1024 * 1024))
+		return false;
 
 	if (!qcfw_is_nor())
 		return false;
@@ -207,7 +236,9 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 	uint64_t dev_flags = 0x22ull;
 
 	static const uint32_t sector_size = 512;
-	uint32_t burst_size = (512 * sector_size);
+
+	if ((burst_size == 0) || ((burst_size % sector_size) != 0))
+		return false;
 
 	uint32_t dev_handle;
 
@@ -215,13 +246,7 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 	if (res != 0)
 		return false;
 
-	uint8_t* buf = (uint8_t*)malloc__(burst_size);
-
-	if (buf == NULL)
-	{
-		lv2_storage_close(dev_handle);
-		return false;
-	}
+	uint8_t buf[sector_size];
 
 	uint32_t curOffset = offset;
 	uint32_t curDataOffset = 0;
@@ -237,11 +262,8 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 
 		uint32_t sector_idx = (curOffset / sector_size);
 
-		if (burst_size > left)
-		{
-			while (burst_size > left)
-				burst_size -= sector_size;
-		}
+		while (burst_size > left)
+			burst_size -= sector_size;
 
 		if ((zzz != 0) || (processSize != sector_size))
 		{
@@ -250,18 +272,14 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 			if (res != 0)
 			{
 				lv2_storage_close(dev_handle);
-				free__(buf);
 				return false;
 			}
 
-			memcpy(&buf[zzz], &dataa[curDataOffset], xxx);
-
-			res = lv2_storage_write(dev_handle, 0, sector_idx, 1, buf, &unknown2, dev_flags);
+			memcpy(&dataa[curDataOffset], &buf[zzz], xxx);
 
 			if (res != 0)
 			{
 				lv2_storage_close(dev_handle);
-				free__(buf);
 				return false;
 			}
 
@@ -272,14 +290,11 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 		}
 		else if ((burst_size > 0) && (left >= burst_size) && ((burst_size % sector_size) == 0))
 		{
-			memcpy(&buf[0], &dataa[curDataOffset], burst_size);
-
-			res = lv2_storage_write(dev_handle, 0, sector_idx, (burst_size / sector_size), buf, &unknown2, dev_flags);
+			res = lv2_storage_read(dev_handle, 0, sector_idx, (burst_size / sector_size), &dataa[curDataOffset], &unknown2, dev_flags);
 
 			if (res != 0)
 			{
 				lv2_storage_close(dev_handle);
-				free__(buf);
 				return false;
 			}
 
@@ -290,14 +305,11 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 		}
 		else
 		{
-			memcpy(&buf[0], &dataa[curDataOffset], processSize);
-
-			res = lv2_storage_write(dev_handle, 0, sector_idx, 1, buf, &unknown2, dev_flags);
+			res = lv2_storage_read(dev_handle, 0, sector_idx, 1, &dataa[curDataOffset], &unknown2, dev_flags);
 
 			if (res != 0)
 			{
 				lv2_storage_close(dev_handle);
-				free__(buf);
 				return false;
 			}
 
@@ -312,7 +324,214 @@ bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size)
 	if (res != 0)
 		return false;
 
-	free__(buf);
+	return true;
+}
+
+bool qcfw_nor_write(uint64_t offset, const void* data, uint32_t size, uint32_t burst_size)
+{
+	const uint8_t* dataa = (const uint8_t*)data;
+
+	if (data == NULL)
+		return false;
+
+	if (size == 0)
+		return true;
+
+	if ((offset + size) > (16 * 1024 * 1024))
+		return false;
+
+	if (!qcfw_is_nor())
+		return false;
+
+	int32_t res;
+
+	uint32_t unknown2;
+
+	uint64_t dev_id = 0x100000000000004ull;
+	uint64_t dev_flags = 0x22ull;
+
+	static const uint32_t sector_size = 512;
+
+	if ((burst_size == 0) || ((burst_size % sector_size) != 0))
+		return false;
+
+	uint32_t dev_handle;
+
+	res = lv2_storage_open(dev_id, &dev_handle);
+	if (res != 0)
+		return false;
+
+	uint8_t buf[sector_size];
+
+	uint32_t curOffset = offset;
+	uint32_t curDataOffset = 0;
+
+	uint32_t left = size;
+
+	while (left > 0)
+	{
+		uint32_t processSize = (left > sector_size) ? sector_size : left;
+		uint32_t zzz = (curOffset % sector_size);
+		uint32_t yyy = (sector_size - zzz);
+		uint32_t xxx = (yyy > processSize) ? processSize : yyy;
+
+		uint32_t sector_idx = (curOffset / sector_size);
+
+		while (burst_size > left)
+			burst_size -= sector_size;
+
+		if ((zzz != 0) || (processSize != sector_size))
+		{
+			res = lv2_storage_read(dev_handle, 0, sector_idx, 1, buf, &unknown2, dev_flags);
+
+			if (res != 0)
+			{
+				lv2_storage_close(dev_handle);
+				return false;
+			}
+
+			memcpy(&buf[zzz], &dataa[curDataOffset], xxx);
+
+			res = lv2_storage_write(dev_handle, 0, sector_idx, 1, buf, &unknown2, dev_flags);
+
+			if (res != 0)
+			{
+				lv2_storage_close(dev_handle);
+				return false;
+			}
+
+			curOffset += xxx;
+			curDataOffset += xxx;
+
+			left -= xxx;
+		}
+		else if ((burst_size > 0) && (left >= burst_size) && ((burst_size % sector_size) == 0))
+		{
+			res = lv2_storage_write(dev_handle, 0, sector_idx, (burst_size / sector_size), &dataa[curDataOffset], &unknown2, dev_flags);
+
+			if (res != 0)
+			{
+				lv2_storage_close(dev_handle);
+				return false;
+			}
+
+			curOffset += burst_size;
+			curDataOffset += burst_size;
+
+			left -= burst_size;
+		}
+		else
+		{
+			res = lv2_storage_write(dev_handle, 0, sector_idx, 1, &dataa[curDataOffset], &unknown2, dev_flags);
+
+			if (res != 0)
+			{
+				lv2_storage_close(dev_handle);
+				return false;
+			}
+
+			curOffset += processSize;
+			curDataOffset += processSize;
+
+			left -= processSize;
+		}
+	}
+
+	res = lv2_storage_close(dev_handle);
+	if (res != 0)
+		return false;
+
+	return true;
+}
+
+bool qcfw_dump_nor_to_file(uint32_t offset, uint32_t size, const char* filePath, uint32_t chunk_size)
+{
+	if (chunk_size == 0)
+		return false;
+
+	uint8_t* chunkBuf = (uint8_t*)malloc__(chunk_size);
+	if (chunkBuf == NULL)
+		return false;
+
+	int32_t fd;
+	if (cellFsOpen(filePath, CELL_FS_O_CREAT | CELL_FS_O_TRUNC | CELL_FS_O_RDWR, &fd, 0, 0) != CELL_FS_SUCCEEDED)
+	{
+		free__(chunkBuf);
+		return false;
+	}
+
+	cellFsChmod(filePath, 0777);
+
+	{
+		uint32_t left = size;
+		uint32_t curNorOffset = offset;
+
+		while (left > 0)
+		{
+			uint32_t processSize = (left > chunk_size) ? chunk_size : left;
+			uint64_t writeSuccessSize = 0;
+
+			if
+			(
+				!qcfw_nor_read(curNorOffset, chunkBuf, processSize, (256 * 1024)) ||
+				(cellFsWrite(fd, chunkBuf, processSize, &writeSuccessSize) != CELL_FS_SUCCEEDED) ||
+				(writeSuccessSize != processSize)
+			)
+			{
+				cellFsClose(fd);
+				free__(chunkBuf);
+
+				return false;
+			}
+
+			curNorOffset += processSize;
+			left -= processSize;
+		}
+	}
+
+	cellFsClose(fd);
+	free__(chunkBuf);
+
+	return true;
+}
+
+bool qcfw_calc_crc32_from_nor(uint32_t offset, uint32_t size, uint32_t chunk_size, uint32_t* out_crc32)
+{
+	if (chunk_size == 0)
+		return false;
+
+	uint8_t* chunkBuf = (uint8_t*)malloc__(chunk_size);
+	if (chunkBuf == NULL)
+		return false;
+
+	uint32_t crc32 = 0;
+
+	{
+		uint32_t left = size;
+		uint32_t curNorOffset = offset;
+
+		while (left > 0)
+		{
+			uint32_t processSize = (left > chunk_size) ? chunk_size : left;
+			uint64_t writeSuccessSize = 0;
+
+			if (!qcfw_nor_read(curNorOffset, chunkBuf, processSize, (256 * 1024)))
+			{
+				free__(chunkBuf);
+				return false;
+			}
+
+			crc32 = qcfw_crc32c(crc32, chunkBuf, processSize);
+
+			curNorOffset += processSize;
+			left -= processSize;
+		}
+	}
+
+	if (out_crc32 != NULL)
+		*out_crc32 = crc32;
+
+	free__(chunkBuf);
 	return true;
 }
 
@@ -343,7 +562,7 @@ bool qcfw_install_stagex(bool showSuccess)
 	// important!!!
 	if (
 		(stagex_stat.st_size == 0) || (stagex_stat.st_size > (0xC000)) || // 48kb
-		(stagex_aux_stat.st_size == 0) || (stagex_aux_stat.st_size > (0x18000)) // 96kb
+		(stagex_aux_stat.st_size == 0) || (stagex_aux_stat.st_size > (0x10000)) // 64kb
 	)
 	{
 		PrintString(L"Bad file size!", XAI_PLUGIN, TEX_ERROR);
@@ -351,14 +570,14 @@ bool qcfw_install_stagex(bool showSuccess)
 	}
 
 	uint32_t stagex_crc32 = 0;
-	if (!qcfw_calc_crc32(stagex_path, &stagex_crc32) || (stagex_crc32 == 0))
+	if (!qcfw_calc_crc32(stagex_path, &stagex_crc32))
 	{
 		PrintString(L"Stagex CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
 	uint32_t stagex_aux_crc32 = 0;
-	if (!qcfw_calc_crc32(stagex_aux_path, &stagex_aux_crc32) || (stagex_aux_crc32 == 0))
+	if (!qcfw_calc_crc32(stagex_aux_path, &stagex_aux_crc32))
 	{
 		PrintString(L"Stagex_aux CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
@@ -366,7 +585,7 @@ bool qcfw_install_stagex(bool showSuccess)
 
 	uint32_t expected_stagex_crc32 = 0;
 	uint32_t expected_stagex_aux_crc32 = 0;
-	if (!qcfw_get_qcfw_crc32("/dev_usb000/qcfw/qcfw.crc32", &expected_stagex_crc32, &expected_stagex_aux_crc32, NULL) || (expected_stagex_crc32 == 0) || (expected_stagex_aux_crc32 == 0))
+	if (!qcfw_get_qcfw_crc32("/dev_usb000/qcfw/qcfw.crc32", &expected_stagex_crc32, &expected_stagex_aux_crc32, NULL))
 	{
 		PrintString(L"qcfw CRC32 get failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
@@ -401,7 +620,7 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
-	if (!qcfw_nor_write(0x31000, tmpDataBuf, (uint32_t)stagex_stat.st_size)) // careful!
+	if (!qcfw_nor_write(0x31000, tmpDataBuf, (uint32_t)stagex_stat.st_size, (64 * 1024))) // careful!
 	{
 		free__(tmpDataBuf);
 		tmpDataBuf = NULL;
@@ -421,7 +640,7 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
-	if (!qcfw_nor_write(0xF21000, tmpDataBuf, (uint32_t)stagex_aux_stat.st_size)) // careful!
+	if (!qcfw_nor_write(0xF21000, tmpDataBuf, (uint32_t)stagex_aux_stat.st_size, (64 * 1024))) // careful!
 	{
 		free__(tmpDataBuf);
 		tmpDataBuf = NULL;
@@ -436,7 +655,7 @@ bool qcfw_install_stagex(bool showSuccess)
 	tmpDataBuf = NULL;
 
 	if (showSuccess)
-		PrintString(L"Success!", XAI_PLUGIN, TEX_SUCCESS);
+		PrintString(L"Success! (NOR)", XAI_PLUGIN, TEX_SUCCESS);
 
 	return true;
 }
@@ -633,7 +852,7 @@ bool qcfw_install_qcfw()
 
 	if (shadow_os_bank_indicator != 0x2)
 	{
-		PrintString(L"Reinstall firmware then try again.", XAI_PLUGIN, TEX_ERROR);
+		PrintString(L"Reinstall HFW then try again.", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
@@ -650,7 +869,7 @@ bool qcfw_install_qcfw()
 
 	// important!!!
 	if (
-		(coreos_stat.st_size == 0) || (coreos_stat.st_size > (0x700000))
+		(coreos_stat.st_size == 0) || (coreos_stat.st_size > (0x6FFFF0))
 	)
 	{
 		PrintString(L"Bad file size!", XAI_PLUGIN, TEX_ERROR);
@@ -661,14 +880,14 @@ bool qcfw_install_qcfw()
 		return false;
 
 	uint32_t coreos_crc32 = 0;
-	if (!qcfw_calc_crc32(coreos_path, &coreos_crc32) || (coreos_crc32 == 0))
+	if (!qcfw_calc_crc32(coreos_path, &coreos_crc32))
 	{
 		PrintString(L"CoreOS CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
 	uint32_t expected_coreos_crc32 = 0;
-	if (!qcfw_get_qcfw_crc32("/dev_usb000/qcfw/qcfw.crc32", NULL, NULL, &expected_coreos_crc32) || (expected_coreos_crc32 == 0))
+	if (!qcfw_get_qcfw_crc32("/dev_usb000/qcfw/qcfw.crc32", NULL, NULL, &expected_coreos_crc32))
 	{
 		PrintString(L"qcfw CRC32 get failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
@@ -703,7 +922,9 @@ bool qcfw_install_qcfw()
 					(0x0C0000 + curFileOffset), // careful!
 
 					tmpDataBuf,
-					processSize
+					processSize,
+
+					tmpDataBuf_MaxSize
 				);
 			}
 
@@ -728,6 +949,26 @@ bool qcfw_install_qcfw()
 	// free right after done!
 	free__(tmpDataBuf);
 	tmpDataBuf = NULL;
+
+	// calc and store ros crc32
+	{
+		uint32_t ros0_crc32 = 0;
+		uint32_t ros1_crc32 = 0;
+
+		if (!qcfw_calc_crc32_from_nor(0x0C0000, 0x6FFFF0, (256 * 1024), &ros0_crc32) ||
+			!qcfw_calc_crc32_from_nor(0x7C0000, 0x6FFFF0, (256 * 1024), &ros1_crc32))
+		{
+			PrintString(L"Calc ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+			return false;
+		}
+
+		if (!qcfw_sc_write_ros0_crc32(ros0_crc32) ||
+			!qcfw_sc_write_ros1_crc32(ros1_crc32))
+		{
+			PrintString(L"Write ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+			return false;
+		}
+	}
 
 	// only wipe and copy dev_blind if /dev_usb000/qcfw/dev_flash directory exists
 
