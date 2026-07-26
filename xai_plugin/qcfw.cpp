@@ -1,5 +1,6 @@
 #include <string.h>
 #include <cell/fs/cell_fs_file_api.h>
+#include <sys/timer.h>
 
 #include "functions.h"
 #include "hfw_settings.h"
@@ -852,7 +853,7 @@ bool qcfw_install_qcfw()
 
 	if (shadow_os_bank_indicator != 0x2)
 	{
-		PrintString(L"Reinstall HFW then try again.", XAI_PLUGIN, TEX_ERROR);
+		PrintString(L"Reinstall HFW once then try again.", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
@@ -996,6 +997,8 @@ bool qcfw_install_qcfw()
 		PrintString(L"Bank switch failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
+
+	sys_timer_sleep(5);
 
 	rebootXMB(SYS_SOFT_REBOOT);
 	return true;
