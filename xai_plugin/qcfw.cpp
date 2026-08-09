@@ -84,6 +84,11 @@ bool qcfw_sc_write_ros1_crc32(uint32_t value)
 	return true;
 }
 
+bool qcfw_sc_read_modchip_version(uint8_t* outValue)
+{
+	return update_mgr_read_eeprom(0x3010, outValue) == 0;
+}
+
 bool qcfw_read_from_file(const char* path, void* outBuf, uint64_t offset, uint32_t readSize)
 {
 	int32_t fd;
@@ -181,7 +186,7 @@ bool qcfw_get_qcfw_crc32(const char* crc32FilePath, uint32_t* outStagexCrc32, ui
 	if (cellFsStat(crc32FilePath, &crc32File_Stat) != CELL_FS_SUCCEEDED)
 		return false;
 
-	if (crc32File_Stat.st_size != 12)
+	if (crc32File_Stat.st_size != 13) // modchip v2
 		return false;
 
 	uint32_t crc32s[3];
@@ -562,8 +567,8 @@ bool qcfw_install_stagex(bool showSuccess)
 
 	// important!!!
 	if (
-		(stagex_stat.st_size == 0) || (stagex_stat.st_size > (0xC000)) || // 48kb
-		(stagex_aux_stat.st_size == 0) || (stagex_aux_stat.st_size > (0x10000)) // 64kb
+		(stagex_stat.st_size == 0) || (stagex_stat.st_size > (0xF000)) || // 60KiB
+		(stagex_aux_stat.st_size == 0) || (stagex_aux_stat.st_size > (0x10000)) // 64KiB
 	)
 	{
 		PrintString(L"Bad file size!", XAI_PLUGIN, TEX_ERROR);
@@ -604,6 +609,42 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
+	// modchip v2 migrate (NOR)
+
+	uint8_t modchip_version = 0;
+	if (!qcfw_sc_read_modchip_version(&modchip_version))
+		return false;
+
+	// todo is_nor
+	{
+		if (modchip_version != 0x2)
+		{
+			uint64_t payload[4];
+			payload[0] = 0x480000057C6802A6ULL;
+			payload[1] = 0x3863FFFCE8830018ULL;
+			payload[2] = 0x7C8903A64E800420ULL;
+			payload[3] = 0x000002401FF21000ULL;
+
+			uint64_t payload_flash[4];
+			if (!qcfw_nor_read(0x31000, payload_flash, 32, 512))
+				return false;
+
+			if (memcmp(payload_flash, payload, 32) != 0)
+			{
+				buzzer(DOUBLE_BEEP);
+
+				if (!qcfw_nor_write(0x31000, payload, 32, 512))
+					return false;
+			}
+			else
+				buzzer(TRIPLE_BEEP);
+		}
+		else
+			buzzer(SINGLE_BEEP);
+	}
+
+	//
+
 	static const uint32_t tmpDataBuf_MaxSize = (128 * 1024); // careful!
 	uint8_t* tmpDataBuf = (uint8_t*)malloc__(tmpDataBuf_MaxSize);
 
@@ -621,7 +662,7 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
-	if (!qcfw_nor_write(0x31000, tmpDataBuf, (uint32_t)stagex_stat.st_size, (64 * 1024))) // careful!
+	if (!qcfw_nor_write(0xF21000, tmpDataBuf, (uint32_t)stagex_stat.st_size, (64 * 1024))) // careful!
 	{
 		free__(tmpDataBuf);
 		tmpDataBuf = NULL;
@@ -641,7 +682,7 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
-	if (!qcfw_nor_write(0xF21000, tmpDataBuf, (uint32_t)stagex_aux_stat.st_size, (64 * 1024))) // careful!
+	if (!qcfw_nor_write(0xF30000, tmpDataBuf, (uint32_t)stagex_aux_stat.st_size, (64 * 1024))) // careful!
 	{
 		free__(tmpDataBuf);
 		tmpDataBuf = NULL;
@@ -656,7 +697,16 @@ bool qcfw_install_stagex(bool showSuccess)
 	tmpDataBuf = NULL;
 
 	if (showSuccess)
-		PrintString(L"Success! (NOR)", XAI_PLUGIN, TEX_SUCCESS);
+	{
+		if (1) // is_nor
+		{
+			if (modchip_version == 0x2)
+				PrintString(L"Success! (NOR v2)", XAI_PLUGIN, TEX_SUCCESS);
+			else
+				PrintString(L"Success! (NOR v2 migrate)\n.uf2 update recommended", XAI_PLUGIN, TEX_SUCCESS);
+		}
+		// (eMMC v2)
+	}
 
 	return true;
 }
