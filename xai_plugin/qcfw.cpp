@@ -610,37 +610,48 @@ bool qcfw_install_stagex(bool showSuccess)
 	}
 
 	// modchip v2 migrate (NOR)
-
-	uint8_t modchip_version = 0;
-	if (!qcfw_sc_read_modchip_version(&modchip_version))
-		return false;
+	bool is_modchip_v2_migrate = false;
 
 	// todo is_nor
+	if (1) // nor only
 	{
-		if (modchip_version != 0x2)
-		{
-			uint64_t payload[4];
-			payload[0] = 0x480000057C6802A6ULL;
-			payload[1] = 0x3863FFFCE8830018ULL;
-			payload[2] = 0x7C8903A64E800420ULL;
-			payload[3] = 0x000002401FF21000ULL;
+		uint8_t shadow_os_bank_indicator = 0xff;
+		if (!qcfw_sc_read_shadow_os_bank_indicator(&shadow_os_bank_indicator))
+			return false;
 
-			uint64_t payload_flash[4];
-			if (!qcfw_nor_read(0x31000, payload_flash, 32, 512))
+		if (shadow_os_bank_indicator != 0xff) // Skip if new install (Stagex never run before)
+		{
+			uint8_t modchip_version = 0;
+			if (!qcfw_sc_read_modchip_version(&modchip_version))
 				return false;
 
-			if (memcmp(payload_flash, payload, 32) != 0)
+			if (modchip_version != 0x2) // not v2 = migrate
 			{
-				buzzer(DOUBLE_BEEP);
+				is_modchip_v2_migrate = true;
 
-				if (!qcfw_nor_write(0x31000, payload, 32, 512))
+				uint64_t payload[4];
+				payload[0] = 0x480000057C6802A6ULL;
+				payload[1] = 0x3863FFFCE8830018ULL;
+				payload[2] = 0x7C8903A64E800420ULL;
+				payload[3] = 0x000002401FF21000ULL;
+
+				uint64_t payload_flash[4];
+				if (!qcfw_nor_read(0x31000, payload_flash, 32, 512))
 					return false;
+
+				if (memcmp(payload_flash, payload, 32) != 0)
+				{
+					buzzer(DOUBLE_BEEP);
+
+					if (!qcfw_nor_write(0x31000, payload, 32, 512))
+						return false;
+				}
+				else
+					buzzer(TRIPLE_BEEP);
 			}
 			else
-				buzzer(TRIPLE_BEEP);
+				buzzer(SINGLE_BEEP);
 		}
-		else
-			buzzer(SINGLE_BEEP);
 	}
 
 	//
@@ -700,10 +711,10 @@ bool qcfw_install_stagex(bool showSuccess)
 	{
 		if (1) // is_nor
 		{
-			if (modchip_version == 0x2)
-				PrintString(L"Success! (NOR v2)", XAI_PLUGIN, TEX_SUCCESS);
-			else
+			if (is_modchip_v2_migrate)
 				PrintString(L"Success! (NOR v2 migrate)\n.uf2 update recommended", XAI_PLUGIN, TEX_SUCCESS);
+			else
+				PrintString(L"Success! (NOR v2)", XAI_PLUGIN, TEX_SUCCESS);
 		}
 		// (eMMC v2)
 	}
