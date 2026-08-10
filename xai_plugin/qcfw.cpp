@@ -89,6 +89,58 @@ bool qcfw_sc_read_modchip_version(uint8_t* outValue)
 	return update_mgr_read_eeprom(0x3010, outValue) == 0;
 }
 
+bool qcfw_sc_write_stagex_size(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30a0 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_crc32(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30a4 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_aux_size(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30a8 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_aux_crc32(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30ac + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
 bool qcfw_read_from_file(const char* path, void* outBuf, uint64_t offset, uint32_t readSize)
 {
 	int32_t fd;
@@ -707,6 +759,19 @@ bool qcfw_install_stagex(bool showSuccess)
 	free__(tmpDataBuf);
 	tmpDataBuf = NULL;
 
+	//
+
+	if (!qcfw_sc_write_stagex_size((uint32_t)stagex_stat.st_size) ||
+		!qcfw_sc_write_stagex_crc32(stagex_crc32) ||
+		!qcfw_sc_write_stagex_aux_size((uint32_t)stagex_aux_stat.st_size) ||
+		!qcfw_sc_write_stagex_aux_crc32(stagex_aux_crc32))
+	{
+		PrintString(L"Write Stagex/Aux size/crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+		return false;
+	}
+
+	//
+
 	if (showSuccess)
 	{
 		if (1) // is_nor
@@ -931,7 +996,7 @@ bool qcfw_install_qcfw()
 
 	// important!!!
 	if (
-		(coreos_stat.st_size == 0) || (coreos_stat.st_size > (0x6FFFF0))
+		(coreos_stat.st_size == 0) || (coreos_stat.st_size != (0x6FFFF0))
 	)
 	{
 		PrintString(L"Bad file size!", XAI_PLUGIN, TEX_ERROR);
@@ -1021,6 +1086,12 @@ bool qcfw_install_qcfw()
 			!qcfw_calc_crc32_from_nor(0x7C0000, 0x6FFFF0, (256 * 1024), &ros1_crc32))
 		{
 			PrintString(L"Calc ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+			return false;
+		}
+
+		if (ros0_crc32 != coreos_crc32)
+		{
+			PrintString(L"CoreOS crc32 check after flash failed!", XAI_PLUGIN, TEX_ERROR);
 			return false;
 		}
 
