@@ -685,8 +685,8 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
-	// modchip v2 migrate (NOR)
-	bool is_modchip_v2_migrate = false;
+	// modchip v1 -> v2 migrate (NOR)
+	bool is_modchip_v1_to_v2_migrate = false;
 
 	// todo is_nor
 	if (1) // nor only
@@ -701,15 +701,15 @@ bool qcfw_install_stagex(bool showSuccess)
 			if (!qcfw_sc_read_modchip_version(&modchip_version))
 				return false;
 
-			if (modchip_version != 0x2) // not v2 = migrate
+			if (modchip_version == 0xff) // this is modchip v1
 			{
-				is_modchip_v2_migrate = true;
+				is_modchip_v1_to_v2_migrate = true;
 
 				uint64_t payload[4];
 				payload[0] = 0x480000057C6802A6ULL;
 				payload[1] = 0x3863FFFCE8830018ULL;
 				payload[2] = 0x7C8903A64E800420ULL;
-				payload[3] = 0x000002401FF21000ULL;
+				payload[3] = 0x000002401FF21000ULL; // v2
 
 				uint64_t payload_flash[4];
 				if (!qcfw_nor_read(0x31000, payload_flash, 32, 512))
@@ -800,8 +800,8 @@ bool qcfw_install_stagex(bool showSuccess)
 	{
 		if (1) // is_nor
 		{
-			if (is_modchip_v2_migrate)
-				PrintString(L"Success! (NOR v2 migrate)\n.uf2 update recommended", XAI_PLUGIN, TEX_SUCCESS);
+			if (is_modchip_v1_to_v2_migrate)
+				PrintString(L"Success! (NOR v1 -> v2 migrate)\n.uf2 update recommended", XAI_PLUGIN, TEX_SUCCESS);
 			else
 				PrintString(L"Success! (NOR v2)", XAI_PLUGIN, TEX_SUCCESS);
 		}
