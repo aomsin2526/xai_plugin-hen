@@ -22,6 +22,30 @@ int32_t qcfw_hvcall_115(uint64_t lpar_addr)
 	return_to_user_prog(int32_t);
 }
 
+int32_t qcfw_fs_sync(const char* path)
+{
+	system_call_1(839, (uint64_t)path);
+	return_to_user_prog(int32_t);
+}
+
+int32_t qcfw_mount_dev_flash()
+{
+	system_call_8(837, (uint64_t)"CELL_FS_IOS:BUILTIN_FLSH1", (uint64_t)"CELL_FS_FAT", (uint64_t)"/dev_flash", 0, 1, 0, 0, 0);
+	return_to_user_prog(int32_t);
+}
+
+int32_t qcfw_umount(const char* path)
+{
+	system_call_1(838, (uint64_t)path);
+	return_to_user_prog(int32_t);
+}
+
+int32_t qcfw_newfs_dev_flash()
+{
+	system_call_4(836, (uint64_t)"CELL_FS_IOS:BUILTIN_FLSH1", (uint64_t)"CELL_FS_FAT", 0, 0);
+	return_to_user_prog(int32_t);
+}
+
 bool qcfw_is_exploited()
 {
 	uint64_t lpar_addr = 0;
@@ -1113,16 +1137,42 @@ bool qcfw_install_qcfw()
 		{
 			cellFsClosedir(usb_fd);
 
-			mount_dev_blind();
-			qcfw_rmdir("/dev_blind");
+			bool result = false;
 
-			if (!qcfw_cpdir(usb_dirPath, "/dev_blind"))
+			for (uint32_t i = 0; i < 2; ++i)
+			{
+				//
+
+				qcfw_umount("/dev_rewrite");
+				umount_dev_blind();
+				qcfw_umount("/dev_flash");
+
+				qcfw_newfs_dev_flash();
+
+				qcfw_mount_dev_flash();
+				mount_dev_blind();
+
+				//
+
+				qcfw_rmdir("/dev_blind");
+
+				//
+
+				result = qcfw_cpdir(usb_dirPath, "/dev_blind");
+				if (result)
+					break;
+			}
+
+			if (!result)
 			{
 				PrintString(L"Copy dev_flash failed!", XAI_PLUGIN, TEX_ERROR);
 				return false;
 			}
 		}
 	}
+
+	qcfw_fs_sync("/dev_blind");
+	qcfw_fs_sync("/dev_flash");
 
 	if (!qcfw_sc_write_request_os_bank_indicator(0x1))
 	{
