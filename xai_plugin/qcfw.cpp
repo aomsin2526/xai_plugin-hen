@@ -695,9 +695,9 @@ bool qcfw_install_stagex(bool showSuccess)
 		if (!qcfw_sc_read_shadow_os_bank_indicator(&shadow_os_bank_indicator))
 			return false;
 
-		if (shadow_os_bank_indicator != 0xff) // Skip if new install (Stagex never run before)
+		if (shadow_os_bank_indicator != 0xff) // old install only
 		{
-			uint8_t modchip_version = 0;
+			uint8_t modchip_version = 0xff;
 			if (!qcfw_sc_read_modchip_version(&modchip_version))
 				return false;
 
