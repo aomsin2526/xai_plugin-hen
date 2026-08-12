@@ -165,6 +165,84 @@ bool qcfw_sc_write_stagex_aux_crc32(uint32_t value)
 	return true;
 }
 
+bool qcfw_sc_write_stagex_size_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30b0 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_crc32_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30b4 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_aux_size_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30b8 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_stagex_aux_crc32_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30bc + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_ros0_crc32_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30c0 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
+bool qcfw_sc_write_ros1_crc32_bak(uint32_t value)
+{
+	const uint8_t* p = (const uint8_t*)&value;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_write_eeprom((0x30c4 + i), p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
 bool qcfw_read_from_file(const char* path, void* outBuf, uint64_t offset, uint32_t readSize)
 {
 	int32_t fd;
@@ -794,6 +872,15 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
+	if (!qcfw_sc_write_stagex_size_bak((uint32_t)stagex_stat.st_size) ||
+		!qcfw_sc_write_stagex_crc32_bak(stagex_crc32) ||
+		!qcfw_sc_write_stagex_aux_size_bak((uint32_t)stagex_aux_stat.st_size) ||
+		!qcfw_sc_write_stagex_aux_crc32_bak(stagex_aux_crc32))
+	{
+		PrintString(L"Write Stagex/Aux size/crc32 bak failed!", XAI_PLUGIN, TEX_ERROR);
+		return false;
+	}
+
 	//
 
 	if (showSuccess)
@@ -1123,6 +1210,13 @@ bool qcfw_install_qcfw()
 			!qcfw_sc_write_ros1_crc32(ros1_crc32))
 		{
 			PrintString(L"Write ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+			return false;
+		}
+
+		if (!qcfw_sc_write_ros0_crc32_bak(ros0_crc32) ||
+			!qcfw_sc_write_ros1_crc32_bak(ros1_crc32))
+		{
+			PrintString(L"Write ros crc32 bak failed!", XAI_PLUGIN, TEX_ERROR);
 			return false;
 		}
 	}
