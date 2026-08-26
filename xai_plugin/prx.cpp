@@ -2069,7 +2069,22 @@ void xai_plugin_interface_action::xai_plugin_action(const char * action)
 	}
 	else if (strcmp(action, "qcfw_install_qcfw") == 0)
 	{
-		qcfw_install_qcfw();
+		//qcfw_install_qcfw();
+		return;
+	}
+	else if (strcmp(action, "qcfw_dump_nor_to_usb") == 0)
+	{
+		qcfw_dump_nor_to_usb();
+		return;
+	}
+	else if (strcmp(action, "qcfw_dump_incomplete_emmc_to_usb_256M") == 0)
+	{
+		qcfw_dump_incomplete_emmc_to_usb_256M();
+		return;
+	}
+	else if (strcmp(action, "qcfw_dump_incomplete_emmc_to_usb_12G") == 0)
+	{
+		qcfw_dump_incomplete_emmc_to_usb_12G();
 		return;
 	}
 
