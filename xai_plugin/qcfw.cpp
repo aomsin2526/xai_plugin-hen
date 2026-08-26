@@ -1526,6 +1526,15 @@ bool qcfw_cpdir(const char* srcDirPath, const char* destDirPath)
 
 bool qcfw_install_qcfw()
 {
+	bool is_nor = qcfw_is_nor();
+	bool is_emmc = qcfw_is_emmc();
+
+	if (!(is_nor || is_emmc))
+	{
+		PrintString(L"Flash is not supported!", XAI_PLUGIN, TEX_ERROR);
+		return false;
+	}
+
 	if (!qcfw_is_exploited())
 	{
 		PrintString(L"Install Stagex and modchip first!", XAI_PLUGIN, TEX_ERROR);
@@ -1604,14 +1613,30 @@ bool qcfw_install_qcfw()
 			result = qcfw_read_from_file(coreos_path, tmpDataBuf, curFileOffset, processSize);
 			if (result)
 			{
-				result = qcfw_nor_write(
-					(0x0C0000 + curFileOffset), // careful!
+				if (is_nor)
+				{
+					result = qcfw_nor_write(
+						(0x0C0000 + curFileOffset), // careful!
 
-					tmpDataBuf,
-					processSize,
+						tmpDataBuf,
+						processSize,
 
-					tmpDataBuf_MaxSize
-				);
+						tmpDataBuf_MaxSize
+					);
+				}
+				else if (is_emmc)
+				{
+					result = qcfw_emmc_write(
+						(0x0C0020 + curFileOffset), // careful!
+
+						tmpDataBuf,
+						processSize,
+
+						tmpDataBuf_MaxSize
+					);
+				}
+				else
+					result = false;
 			}
 
 			if (!result)
@@ -1641,12 +1666,26 @@ bool qcfw_install_qcfw()
 		uint32_t ros0_crc32 = 0;
 		uint32_t ros1_crc32 = 0;
 
-		if (!qcfw_calc_crc32_from_nor(0x0C0000, 0x6FFFF0, (256 * 1024), &ros0_crc32) ||
-			!qcfw_calc_crc32_from_nor(0x7C0000, 0x6FFFF0, (256 * 1024), &ros1_crc32))
+		if (is_nor)
 		{
-			PrintString(L"Calc ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
-			return false;
+			if (!qcfw_calc_crc32_from_nor(0x0C0000, 0x6FFFF0, (256 * 1024), &ros0_crc32) ||
+				!qcfw_calc_crc32_from_nor(0x7C0000, 0x6FFFF0, (256 * 1024), &ros1_crc32))
+			{
+				PrintString(L"Calc ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+				return false;
+			}
 		}
+		else if (is_emmc)
+		{
+			if (!qcfw_calc_crc32_from_emmc(0x0C0020, 0x6FFFF0, (256 * 1024), &ros0_crc32) ||
+				!qcfw_calc_crc32_from_emmc(0x7C0010, 0x6FFFF0, (256 * 1024), &ros1_crc32))
+			{
+				PrintString(L"Calc ros crc32 failed!", XAI_PLUGIN, TEX_ERROR);
+				return false;
+			}
+		}
+		else
+			return false;
 
 		if (ros0_crc32 != coreos_crc32)
 		{
@@ -1723,7 +1762,7 @@ bool qcfw_install_qcfw()
 	}
 
 	sys_timer_sleep(5);
-
+	
 	rebootXMB(SYS_SOFT_REBOOT);
 	return true;
 }
