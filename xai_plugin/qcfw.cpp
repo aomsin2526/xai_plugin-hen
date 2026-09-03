@@ -357,7 +357,7 @@ bool qcfw_get_qcfw_crc32(const char* crc32FilePath, uint32_t* outStagexCrc32, ui
 	if (cellFsStat(crc32FilePath, &crc32File_Stat) != CELL_FS_SUCCEEDED)
 		return false;
 
-	if (crc32File_Stat.st_size != 13) // modchip v2
+	if (crc32File_Stat.st_size != 15) // modchip v2
 		return false;
 
 	uint32_t crc32s[3];
