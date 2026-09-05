@@ -1132,6 +1132,9 @@ bool qcfw_install_stagex(bool showSuccess)
 		return false;
 	}
 
+	if (!qcfw_sc_write_request_os_bank_indicator(0xff))
+		return false;
+
 	const char* stagex_path = "/dev_usb000/qcfw/Stagex.bin";
 	bool stagex_exist = false;
 	CellFsStat stagex_stat;
