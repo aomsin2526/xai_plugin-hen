@@ -130,6 +130,11 @@ bool qcfw_sc_read_modchip_version(uint8_t* outValue)
 	return update_mgr_read_eeprom(0x3010, outValue) == 0;
 }
 
+bool qcfw_sc_read_lv0ldr_region_dump_status(uint8_t* outValue)
+{
+	return update_mgr_read_eeprom(0x3013, outValue) == 0;
+}
+
 bool qcfw_sc_write_stagex_size(uint32_t value)
 {
 	const uint8_t* p = (const uint8_t*)&value;
@@ -260,6 +265,19 @@ bool qcfw_sc_write_ros1_crc32_bak(uint32_t value)
 	return true;
 }
 
+bool qcfw_sc_read_lv0ldr_region_crc32(uint32_t* outValue)
+{
+	uint8_t* p = (uint8_t*)outValue;
+
+	for (uint32_t i = 0; i < 4; ++i)
+	{
+		if (update_mgr_read_eeprom((0x30c8 + i), &p[i]) != 0)
+			return false;
+	}
+
+	return true;
+}
+
 bool qcfw_read_from_file(const char* path, void* outBuf, uint64_t offset, uint32_t readSize)
 {
 	int32_t fd;
@@ -299,7 +317,7 @@ uint32_t qcfw_crc32c(uint32_t crc, const uint8_t* buf, size_t len)
 	return ~crc;
 }
 
-bool qcfw_calc_crc32(const char* filePath, uint32_t* outCrc32)
+bool qcfw_calc_crc32_from_file(const char* filePath, uint32_t* outCrc32)
 {
 	CellFsStat file_Stat;
 	if (cellFsStat(filePath, &file_Stat) != CELL_FS_SUCCEEDED)
@@ -730,8 +748,15 @@ int32_t qcfw_lv2_storage_read_emmc(uint32_t dev_handle, uint64_t unknown1, uint6
 			fillSectorCount = leftSectorCount;
 
 		uint32_t totalSizeToFillInBytes = (fillSectorCount * sector_size);
-
 		memset(buff, 0xff, totalSizeToFillInBytes);
+
+		{
+			int32_t res = lv2_storage_read(dev_handle, unknown1, ((start_sector + (0xF000000 / sector_size)) - masked_sector_count), fillSectorCount, &buff[0], unknown2, flags);
+
+			if (res != 0)
+				return res;
+		}
+
 		leftSectorCount -= fillSectorCount;
 
 		if (leftSectorCount > 0)
@@ -1134,14 +1159,14 @@ bool qcfw_install_stagex(bool showSuccess)
 	}
 
 	uint32_t stagex_crc32 = 0;
-	if (!qcfw_calc_crc32(stagex_path, &stagex_crc32))
+	if (!qcfw_calc_crc32_from_file(stagex_path, &stagex_crc32))
 	{
 		PrintString(L"Stagex CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
 	uint32_t stagex_aux_crc32 = 0;
-	if (!qcfw_calc_crc32(stagex_aux_path, &stagex_aux_crc32))
+	if (!qcfw_calc_crc32_from_file(stagex_aux_path, &stagex_aux_crc32))
 	{
 		PrintString(L"Stagex_aux CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
@@ -1575,7 +1600,7 @@ bool qcfw_install_qcfw()
 		return false;
 
 	uint32_t coreos_crc32 = 0;
-	if (!qcfw_calc_crc32(coreos_path, &coreos_crc32))
+	if (!qcfw_calc_crc32_from_file(coreos_path, &coreos_crc32))
 	{
 		PrintString(L"CoreOS CRC32 calc failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
@@ -1779,20 +1804,69 @@ bool qcfw_dump_nor_to_usb()
 	return true;
 }
 
-bool qcfw_dump_incomplete_emmc_to_usb_256M()
+bool qcfw_emmc_is_complete()
 {
-	if (!qcfw_dump_emmc_to_file(0, (256 * 1024 * 1024), "/dev_usb000/eMMC_incomplete_256M.bin", (256 * 1024)))
+	if (!qcfw_is_emmc())
+		return false;
+
+	uint8_t lv0ldr_region_dump_status = 0xff;
+	if (!qcfw_sc_read_lv0ldr_region_dump_status(&lv0ldr_region_dump_status))
+		return false;
+
+	if (lv0ldr_region_dump_status != 0x27)
+		return false;
+
+	uint32_t lv0ldr_region_crc32 = 0;
+	if (!qcfw_sc_read_lv0ldr_region_crc32(&lv0ldr_region_crc32))
+		return false;
+
+	static const uint32_t dumpSize = 0x40000;
+
+	static const uint32_t tmpDataBuf_MaxSize = dumpSize;
+	uint8_t* tmpDataBuf = (uint8_t*)malloc__(tmpDataBuf_MaxSize);
+
+	if (tmpDataBuf == NULL)
+		return false;
+
+	if (!qcfw_emmc_read(0xF000000, tmpDataBuf, dumpSize, (256 * 1024)))
+	{
+		free__(tmpDataBuf);
+		return false;
+	}
+
+	uint32_t lv0ldr_bottom_region_crc32 = qcfw_crc32c(0, tmpDataBuf, dumpSize);
+	if (lv0ldr_bottom_region_crc32 != lv0ldr_region_crc32)
+	{
+		free__(tmpDataBuf);
+		return false;
+	}
+
+	free__(tmpDataBuf);
+	return true;
+}
+
+bool qcfw_dump_emmc_to_usb_256M()
+{
+	bool is_complete = qcfw_emmc_is_complete();
+
+	if (!qcfw_dump_emmc_to_file(0, (256 * 1024 * 1024), (is_complete ? "/dev_usb000/eMMC_complete_256M.bin" : "/dev_usb000/eMMC_incomplete_256M.bin"), (256 * 1024)))
 	{
 		PrintString(L"Failed!", XAI_PLUGIN, TEX_ERROR);
 		return false;
 	}
 
-	PrintString(L"Success!", XAI_PLUGIN, TEX_SUCCESS);
+	if (is_complete)
+		PrintString(L"Success! (complete)", XAI_PLUGIN, TEX_SUCCESS);
+	else
+		PrintString(L"Success! (incomplete)", XAI_PLUGIN, TEX_SUCCESS);
+
 	return true;
 }
 
-bool qcfw_dump_incomplete_emmc_to_usb_12G()
+bool qcfw_dump_emmc_to_usb_12G()
 {
+	bool is_complete = qcfw_emmc_is_complete();
+
 	static const uint64_t dump_size = 13193183232ull;
 	static const uint64_t chunk_size = (3ULL * 1024ULL * 1024ULL * 1024ULL);
 
@@ -1806,7 +1880,11 @@ bool qcfw_dump_incomplete_emmc_to_usb_12G()
 		uint64_t processSize = (left > chunk_size) ? chunk_size : left;
 
 		char path[512];
-		sprintf_(path, "/dev_usb000/eMMC_incomplete_12G_%u.bin", i);
+
+		if (is_complete)
+			sprintf_(path, "/dev_usb000/eMMC_complete_12G_%u.bin", i);
+		else
+			sprintf_(path, "/dev_usb000/eMMC_incomplete_12G_%u.bin", i);
 
 		if (!qcfw_dump_emmc_to_file(cur_offset, processSize, path, (256 * 1024)))
 		{
@@ -1820,6 +1898,10 @@ bool qcfw_dump_incomplete_emmc_to_usb_12G()
 		++i;
 	}
 
-	PrintString(L"Success!", XAI_PLUGIN, TEX_SUCCESS);
+	if (is_complete)
+		PrintString(L"Success! (complete)", XAI_PLUGIN, TEX_SUCCESS);
+	else
+		PrintString(L"Success! (incomplete)", XAI_PLUGIN, TEX_SUCCESS);
+
 	return true;
 }

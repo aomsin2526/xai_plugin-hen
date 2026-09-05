@@ -11,5 +11,5 @@ extern bool qcfw_install_qcfw();
 
 extern bool qcfw_dump_nor_to_usb();
 
-extern bool qcfw_dump_incomplete_emmc_to_usb_256M();
-extern bool qcfw_dump_incomplete_emmc_to_usb_12G();
+extern bool qcfw_dump_emmc_to_usb_256M();
+extern bool qcfw_dump_emmc_to_usb_12G();
